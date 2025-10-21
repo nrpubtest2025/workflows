@@ -1,0 +1,54 @@
+name: Re-usable Release Workflow
+
+# This workflow assumes the target repository has a `package.json` in the
+# root that publishes a single module, i.e. the repository is not a monorepo.
+# It further assumes that the `(package.json).version` field has been updated
+# with the version string that should be published.
+#
+# This workflow will create a new git tag for the module version, along with
+# a new GitHub release. It will then publish the new module version to
+# npmjs.org via "Trusted Publishing" (https://docs.npmjs.com/trusted-publishers).
+
+on:
+  workflow_call:
+
+permissions:
+  # In order to create the git tag, we must have write permissions.
+  contents: write
+  # This is important. Trusted Publishing requires this for the OIDC exchange.
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+      - name: setup git
+        run: |
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
+      - uses: actions/setup-node@v5
+        with:
+          # Trusted Publishing requires `npm@11.5.1` or later. Compatible
+          # versions of `npm` started shipping with Node.js v24.5.0.
+          # If, for some odd reason, you need to use an earlier Node.js release,
+          # you _must_ add another step subsequent to this one that performs:
+          # `npm install -g npm@latest`.
+          node-version: 24.x
+          # This is important. The OIDC exchange requires that the registry
+          # URL matches on both ends.
+          registry-url: https://registry.npmjs.org
+      - name: create tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git tag v$(jq -r '.version' package.json)
+          git push --tags
+      - name: create release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create v$(jq -r '.version' package.json) --generate-notes
+      - name: npm publish
+        run: npm publish
